@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nearby Schools Catalog</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #f3f4f6;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+        .results-card {
+            background: #ffffff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+            width: 100%;
+            max-width: 650px;
+        }
+        h1 { margin-top: 0; color: #1e3a8a; font-size: 24px; text-align: center; }
+        p { color: #6b7280; font-size: 14px; text-align: center; margin-bottom: 25px; }
+        .table-wrapper { overflow-x: auto; margin-top: 15px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px; text-align: left; }
+        th, td { padding: 12px; border-bottom: 1px solid #e5e7eb; }
+        th { background-color: #f8fafc; color: #1e3a8a; font-weight: bold; }
+        tr:hover { background-color: #f8fafc; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; text-transform: uppercase; }
+        .badge-public { background-color: #dbeafe; color: #1e40af; }
+        .badge-private { background-color: #fef3c7; color: #92400e; }
+        .back-btn {
+            width: 100%;
+            background-color: #4b5563;
+            color: white;
+            border: none;
+            padding: 12px;
+            font-size: 14px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            text-transform: uppercase;
+        }
+        .back-btn:hover { background-color: #374151; }
+        .loader { text-align: center; font-weight: bold; color: #2563eb; padding: 20px 0; }
+    </style>
+</head>
+<body>
+
+    <div class="results-card">
+        <h1>Nearby Schools Catalog</h1>
+        <p id="welcomeUser">Loading search data...</p>
+
+        <div id="loadingIndicator" class="loader">🔍 Querying OpenStreetMap API data...</div>
+
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>School Name</th>
+                        <th>Type</th>
+                        <th>Exact Address (Coordinates)</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    <!-- Data rows load here -->
+                </tbody>
+            </table>
+        </div>
+
+        <button type="button" class="back-btn" onclick="window.location.href='index.html'">← Back to Registration</button>
+    </div>
+
+    <script>
+        // Retrieve values out of temporary memory storage handles
+        const name = sessionStorage.getItem('studentName') || 'Student';
+        const lat = sessionStorage.getItem('searchLat');
+        const lon = sessionStorage.getItem('searchLon');
+
+        document.getElementById('welcomeUser').innerText = `Showing nearby data matched for student: ${name}`;
+
+        if (!lat || !lon) {
+            document.getElementById('tableBody').innerHTML = `<tr><td colspan="3" style="text-align:center; color:red;">No location coordinates found. Go back and share GPS.</td></tr>`;
+            document.getElementById('loadingIndicator').style.display = 'none';
+        } else {
+            fetchSchools(lat, lon);
+        }
+
+           async function fetchSchools(latitude, longitude) {
+            const tableBody = document.getElementById('tableBody');
+            const loader = document.getElementById('loadingIndicator');
+            const radius = 3000; // Search radius in meters (3km)
+
+            // 1. Build the clean query text block
+            const query = `[out:json][timeout:30];node(around:${radius},${latitude},${longitude})[amenity=school];out body;`;
+            
+            // 2. Use the official stable query interpreter endpoint
+            const url = "https://overpass-api.de/api/interpreter";
+
+            // 3. Configure a POST request exactly how the server expects it
+            const fetchOptions = {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+                },
+                // The data must be prefixed with 'data=' as required by the API
+                body: 'data=' + encodeURIComponent(query)
+            };
+
+            try {
+                console.log("Sending optimized POST query to Overpass API...");
+                const response = await fetch(url, fetchOptions);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP Error Status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log("✅ Data successfully retrieved!", data);
+                
+                loader.style.display = 'none';
+                renderRows(data.elements);
+
+            } catch (err) {
+                console.error("Detailed Debug Error:", err);
+                
+                // If it fails, show an informative backup error message inside the table row
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="3" style="text-align:center; color:#ea580c; font-weight: 500; padding: 20px;">
+                            ⚠️ Request blocked by browser security (CORS) or network restrictions. <br>
+                            <span style="font-size:12px; color:#6b7280; display:block; margin-top:5px;">
+                                💡 <strong>How to fix:</strong> In VS Code, right-click <code>index.html</code> and choose <strong>"Open with Live Server"</strong> instead of double-clicking the file. This fixes browser security limits!
+                            </span>
+                        </td>
+                    </tr>`;
+                loader.style.display = 'none';
+            }
+        }
+
+
+        function renderRows(schools) {
+            const tableBody = document.getElementById('tableBody');
+            if (!schools || schools.length === 0) {
+                tableBody.innerHTML = `<tr><td colspan="3" style="text-align:center;">No schools found within 3km.</td></tr>`;
+                return;
+            }
+
+            schools.forEach(school => {
+                const schoolName = school.tags.name || "Unnamed Institutional Facility";
+                const opType = (school.tags['operator:type'] || '').toLowerCase();
+                const schoolType = (school.tags['school:type'] || '').toLowerCase();
+                
+                let classifiedType = "Private";
+                let badgeClass = "badge-private";
+
+                if (opType === 'government' || opType === 'public' || schoolType === 'public' || schoolName.toLowerCase().includes('govt') || schoolName.toLowerCase().includes('government')) {
+                    classifiedType = "Government / Public";
+                    badgeClass = "badge-public";
+                }
+
+                const street = school.tags['addr:street'] || '';
+                const city = school.tags['addr:city'] || '';
+                const address = (street || city) ? `${street}, ${city}` : `Lat: ${school.lat.toFixed(4)}, Lon: ${school.lon.toFixed(4)}`;
+
+                const rowHtml = `
+                    <tr>
+                        <td style="font-weight: 600;">${schoolName}</td>
+                        <td><span class="badge ${badgeClass}">${classifiedType}</span></td>
+                        <td>${address}</td>
+                    </tr>
+                `;
+                tableBody.insertAdjacentHTML('beforeend', rowHtml);
+            });
+        }
+    </script>
+</body>
+</html>
